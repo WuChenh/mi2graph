@@ -4,6 +4,12 @@ authors = ["Chenhua Wu <chanhuawu@outlook.com>"]
 version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+description = "Generate MIC relations between features with dynamic feature filtering for graph initialization"
+readme = "README.md"
+repository = "https://github.com/WuChenh/mi2graph"
+homepage = "https://github.com/WuChenh/mi2graph"
+keywords = ["bioinformatics", "machine-learning"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 chrono = "0.4.38"
