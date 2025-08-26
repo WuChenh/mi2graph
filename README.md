@@ -1,3 +1,7 @@
+![Crates.io](https://img.shields.io/crates/v/mi2graph)
+![Crates.io](https://img.shields.io/crates/d/mi2graph)
+![Crates.io](https://img.shields.io/crates/l/mi2graph)
+
 # mi2graph
 
 ## About
