@@ -13,8 +13,8 @@ use std::error::Error;
 /// + Each row in input `feat_pairs` is a feature pair.
 pub fn iter_feat_pairs_mi(
     data: &Array2<f64>,
-    sliding_windows: &Vec<Vec<usize>>,
-    features_sort_indices: &Vec<Vec<usize>>,
+    sliding_windows: &[Vec<usize>],
+    features_sort_indices: &[Vec<usize>],
     sort_results: bool,
 ) -> (Array1<f64>, Array2<i64>) {
     // Calculate the number of feature pairs.
@@ -67,17 +67,17 @@ pub fn iter_feat_pairs_mi(
 
 /// Sort mutual information values in descending order.
 /// `feat_pairs` are also sorted.
-fn sort_mi_results(mi_vec: &Vec<f64>, feat_pairs: &Array2<i64>) -> (Vec<f64>, Array2<i64>) {
+fn sort_mi_results(mi_vec: &[f64], feat_pairs: &Array2<i64>) -> (Vec<f64>, Array2<i64>) {
     // Get descending indices.
     let mut sort_idx = get_sort_indices_vecf64(mi_vec);
     sort_idx.reverse();
 
     let mut feat_pairs_sorted = feat_pairs.clone();
-    let mut mi_vec_sorted = mi_vec.clone();
+    let mut mi_vec_sorted = vec![0.0; mi_vec.len()];
     // Sort mutual information values and feature pairs.
-    for (i, idx) in sort_idx.iter().enumerate() {
-        mi_vec_sorted[i] = mi_vec[*idx];
-        feat_pairs_sorted.row_mut(i).assign(&feat_pairs.row(*idx));
+    for (i, &idx) in sort_idx.iter().enumerate() {
+        mi_vec_sorted[i] = mi_vec[idx];
+        feat_pairs_sorted.row_mut(i).assign(&feat_pairs.row(idx));
     }
 
     (mi_vec_sorted, feat_pairs_sorted)
@@ -96,9 +96,9 @@ fn sort_mi_results(mi_vec: &Vec<f64>, feat_pairs: &Array2<i64>) -> (Vec<f64>, Ar
 pub fn mi_optimal(
     f1: &[f64],
     f2: &[f64],
-    sliding_windows: &Vec<Vec<usize>>,
-    sort_ind_f1: &Vec<usize>,
-    sort_ind_f2: &Vec<usize>,
+    sliding_windows: &[Vec<usize>],
+    sort_ind_f1: &[usize],
+    sort_ind_f2: &[usize],
 ) -> f64 {
     // Sort feature_1 and feature_2 in ascending order based on the sortperm of feature_1.
     let sorted_f1: Vec<f64> = sort_ind_f1.iter().map(|&i| f1[i]).collect();
@@ -118,7 +118,7 @@ pub fn mi_optimal(
         let tmp_sorted_f1 = &sorted_f1[tmp_sta..tmp_end];
         let tmp_sorted_f2 = &sorted_f2[tmp_sta..tmp_end];
 
-        let tmp_sorted_ind_f1: Vec<usize> = (0..(tmp_end - tmp_sta)).map(|i| i).collect();
+        let tmp_sorted_ind_f1: Vec<usize> = (0..(tmp_end - tmp_sta)).collect();
         let tmp_sorted_ind_f2: Vec<usize> = get_sort_indices_vecf64_slice(tmp_sorted_f2);
 
         // Calculate the mutual information.
@@ -154,12 +154,12 @@ pub fn mi_optimal(
 ///
 /// How to determine the bins?
 ///
-/// RectangularBinning (the adaptive partitioning approach): Freedman-Diaconis' rule (no assumption on the distribution).
+/// `RectangularBinning` (the adaptive partitioning approach): Freedman-Diaconis' rule (no assumption on the distribution).
 fn mi_fd(
     feat_1: &[f64],
     feat_2: &[f64],
-    sort_ind_f1: &Vec<usize>,
-    sort_ind_f2: &Vec<usize>,
+    sort_ind_f1: &[usize],
+    sort_ind_f2: &[usize],
     normalized: bool,
 ) -> f64 {
     // Generate the bins.
@@ -171,24 +171,24 @@ fn mi_fd(
     };
 
     // Calculate the mutual information.
-    hist2mi(
-        feat_1,
-        feat_2,
-        n_bins_f1,
-        n_bins_f2,
-        bin_width_f1,
-        bin_width_f2,
-        &quantiles_f1,
-        &quantiles_f2,
-        normalized,
-    )
+    let cfg_f1 = BinConfig {
+        n_bins: n_bins_f1,
+        bin_width: bin_width_f1,
+        quantiles: &quantiles_f1,
+    };
+    let cfg_f2 = BinConfig {
+        n_bins: n_bins_f2,
+        bin_width: bin_width_f2,
+        quantiles: &quantiles_f2,
+    };
+    hist2mi(feat_1, feat_2, cfg_f1, cfg_f2, normalized)
 }
 
-/// RectangularBinning (the adaptive partitioning approach): Freedman-Diaconis' rule (no assumption on the distribution)
+/// `RectangularBinning` (the adaptive partitioning approach): Freedman-Diaconis' rule (no assumption on the distribution)
 /// + Returns the number of bins, the bin width, and the quantiles.
 fn bins_fd(
     vec_x: &[f64],
-    sort_indices: &Vec<usize>,
+    sort_indices: &[usize],
 ) -> Result<(usize, f64, Vec<f64>), Box<dyn Error>> {
     let len_vec = vec_x.len();
     let len_vec_f64 = len_vec as f64;
@@ -213,27 +213,30 @@ fn bins_fd(
     Ok((n_bins, bin_width, quantiles))
 }
 
+/// Configuration for histogram binning.
+struct BinConfig<'a> {
+    n_bins: usize,
+    bin_width: f64,
+    quantiles: &'a [f64],
+}
+
 /// Calculate the mutual information value between two vectors using the histogram method.
 fn hist2mi(
     vec_1: &[f64],
     vec_2: &[f64],
-    n_bins_v1: usize,
-    n_bins_v2: usize,
-    bin_width_v1: f64,
-    bin_width_v2: f64,
-    quantiles_v1: &Vec<f64>,
-    quantiles_v2: &Vec<f64>,
+    cfg_v1: BinConfig<'_>,
+    cfg_v2: BinConfig<'_>,
     normalized: bool,
 ) -> f64 {
     let len_vec = vec_1.len();
-    let mut hist2d: Array2<f64> = Array2::zeros((n_bins_v1, n_bins_v2));
-    let mut p_v1: Array1<f64> = Array1::zeros(n_bins_v1);
-    let mut p_v2: Array1<f64> = Array1::zeros(n_bins_v2);
+    let mut hist2d: Array2<f64> = Array2::zeros((cfg_v1.n_bins, cfg_v2.n_bins));
+    let mut p_v1: Array1<f64> = Array1::zeros(cfg_v1.n_bins);
+    let mut p_v2: Array1<f64> = Array1::zeros(cfg_v2.n_bins);
 
     // Loop through all data points
     for i in 0..len_vec {
-        let bin_v1 = (vec_1[i] - quantiles_v1[0]) / bin_width_v1;
-        let bin_v2 = (vec_2[i] - quantiles_v2[0]) / bin_width_v2;
+        let bin_v1 = (vec_1[i] - cfg_v1.quantiles[0]) / cfg_v1.bin_width;
+        let bin_v2 = (vec_2[i] - cfg_v2.quantiles[0]) / cfg_v2.bin_width;
         let mut tmp_ind_bin_v1 = (bin_v1.round() as isize) - 1;
         let mut tmp_ind_bin_v2 = (bin_v2.round() as isize) - 1;
         if tmp_ind_bin_v1 < 0 {
@@ -258,8 +261,8 @@ fn hist2mi(
     // Calculate the mutual information.
     let mut mi = 0.0;
 
-    for i in 0..n_bins_v1 {
-        for j in 0..n_bins_v2 {
+    for i in 0..cfg_v1.n_bins {
+        for j in 0..cfg_v2.n_bins {
             let p_ij = norm_hist2d[[i, j]];
             if p_ij > 1e-7 {
                 let p_v1_i = norm_p_v1[i];
@@ -271,7 +274,7 @@ fn hist2mi(
 
     // Apply the normalization if needed.
     if normalized {
-        let mi_max = (n_bins_v1 as f64 * n_bins_v2 as f64).sqrt().log2();
+        let mi_max = (cfg_v1.n_bins as f64 * cfg_v2.n_bins as f64).sqrt().log2();
         mi /= mi_max;
     }
 

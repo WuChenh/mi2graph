@@ -9,16 +9,16 @@ fn init_windows(
     step_slide: usize,
 ) -> Vec<Vec<usize>> {
     // Check the validity of the parameters.
-    if min_win_size < 2 {
-        panic!("Minimum window size must be greater than or equal to 2.");
-        // If the minimum window size is 2, the step width of window size must be 1.
-    }
-    if max_win_size < min_win_size || max_win_size > len_vec {
-        panic!("Maximum window size must be greater than or equal to the minimum window size and less than or equal to the length of the vector.");
-    }
-    if step_win_size < 1 || step_slide < 1 {
-        panic!("Step widths of window size and slide must be greater than or equal to 1.");
-    }
+    // If the minimum window size is 2, the step width of window size must be 1.
+    assert!(
+        min_win_size >= 2,
+        "Minimum window size must be greater than or equal to 2."
+    );
+    assert!(!(max_win_size < min_win_size || max_win_size > len_vec), "Maximum window size must be greater than or equal to the minimum window size and less than or equal to the length of the vector.");
+    assert!(
+        !(step_win_size < 1 || step_slide < 1),
+        "Step widths of window size and slide must be greater than or equal to 1."
+    );
 
     // Initialize the windows
     let mut windows: Vec<Vec<usize>> = Vec::new();
@@ -39,10 +39,11 @@ fn init_windows(
                 // Raise an error
                 // panic!("Window size is larger than the length of the vector.");
             }
-            if start >= end {
-                // Raise an error
-                panic!("Window size is larger than the length of the vector.");
-            }
+            // Raise an error
+            assert!(
+                start < end,
+                "Window size is larger than the length of the vector."
+            );
             windows.push(vec![start, end]);
         }
     }
@@ -70,12 +71,11 @@ pub fn init_windows_from_ratio(
     let max_win_size = (len_vec as f64 * ratio_max_window).round() as usize;
     let step_win_size = (len_vec as f64 * ratio_step_window).round() as usize;
     let step_slide = (len_vec as f64 * ratio_step_sliding).round() as usize;
-    let sld_windows = init_windows(
+    init_windows(
         len_vec,
         min_win_size,
         max_win_size,
         step_win_size,
         step_slide,
-    );
-    sld_windows
+    )
 }

@@ -1,15 +1,21 @@
 use clap::{Arg, ArgAction, Command};
-use mi2graph::{mic_mat_with_data_filter, read_parquet_to_array2d};
+use mi2graph::{
+    mic_mat_with_data_filter, read_parquet_to_array2d, FilterConfig, ProcessingOptions,
+    WindowConfig,
+};
 use std::fs;
 use std::path::Path;
 
 fn main() {
     let matches = cli().get_matches();
 
-    let path_in = matches.get_one::<String>("in").map(|s| s.as_str()).unwrap();
+    let path_in = matches
+        .get_one::<String>("in")
+        .map(std::string::String::as_str)
+        .unwrap();
     let path_out = matches
         .get_one::<String>("out")
-        .map(|s| s.as_str())
+        .map(std::string::String::as_str)
         .unwrap();
     let n_features_to_select: usize = *matches
         .get_one("nfeat")
@@ -48,35 +54,45 @@ fn main() {
     if let Some(parent) = Path::new(path_out).parent() {
         if !parent.exists() {
             if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("Failed to create directory for output: {}", e);
+                eprintln!("Failed to create directory for output: {e}");
                 std::process::exit(1);
             }
         }
     }
+
+    let filter_config = FilterConfig {
+        thre_cv,
+        thre_pcc,
+        thre_mi,
+    };
+    let window_config = WindowConfig {
+        ratio_min: ratio_min_window,
+        ratio_max: ratio_max_window,
+        ratio_step: ratio_step_window,
+        ratio_slide: ratio_step_sliding,
+    };
+    let options = ProcessingOptions {
+        check_sim,
+        n_features_to_select,
+        n_threads,
+    };
 
     mic_mat_with_data_filter(
         path_out,
         &array_2d,
         &obs_names,
         &var_names,
-        check_sim,
-        n_features_to_select,
-        thre_cv,
-        thre_pcc,
-        thre_mi,
-        ratio_max_window,
-        ratio_min_window,
-        ratio_step_window,
-        ratio_step_sliding,
-        n_threads,
+        filter_config,
+        window_config,
+        options,
     )
-    .expect("Failed to read file");
+    .expect("Failed to process data");
 }
 
 /// Define the CLI interface
 fn cli() -> Command {
     Command::new("mi2graph")
-        .version("0.2.0")
+        .version(env!("CARGO_PKG_VERSION"))
         .author("Chenhua Wu, chanhuawu@outlook.com")
         .about("Generate MIC relations between features with dynamic feature filtering for graph initialization.")
         .args([

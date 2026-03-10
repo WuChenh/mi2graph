@@ -1,11 +1,11 @@
-use crate::sortf64::{sort_vec_f64, sort_vecs_by_first};
+use crate::sortf64::sort_vecs_by_first;
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
 fn cv_array2d(
     array_2d: &Array2<f64>,
-    sliding_windows: &Vec<Vec<usize>>,
-    feat_sort_indices: &Vec<Vec<usize>>,
+    sliding_windows: &[Vec<usize>],
+    feat_sort_indices: &[Vec<usize>],
 ) -> Vec<f64> {
     let n_feat = array_2d.nrows();
     let n_windows = sliding_windows.len();
@@ -57,23 +57,23 @@ fn cv_array2d(
 /// Filters features based on coefficient of variation (CV) criteria.
 ///
 /// Args:
-///     array_2d: 2D array of feature data (features × samples)
-///     cv_threshold: Minimum CV value to retain features (ignored if n_features_to_select > 0)
-///     n_features_to_select: Number of top-CV features to retain (0 = use cv_threshold instead)
-///     sliding_windows: Window indices for CV calculation
-///     feat_sort_indices: Precomputed sorted feature indices for each window
+///     `array_2d`: 2D array of feature data (features × samples)
+///     `cv_threshold`: Minimum CV value to retain features (ignored if `n_features_to_select` > 0)
+///     `n_features_to_select`: Number of top-CV features to retain (0 = use `cv_threshold` instead)
+///     `sliding_windows`: Window indices for CV calculation
+///     `feat_sort_indices`: Precomputed sorted feature indices for each window
 ///
 /// Returns:
-///     Tuple of (filtered_data, kept_feat_indices, filtered_feat_sort_indices) where:
-///     - filtered_data: Subset of input array with selected features
-///     - kept_feat_indices: Original indices of retained features
-///     - filtered_feat_sort_indices: Subset of feat_sort_indices for retained features
+///     Tuple of (`filtered_data`, `kept_feat_indices`, `filtered_feat_sort_indices`) where:
+///     - `filtered_data`: Subset of input array with selected features
+///     - `kept_feat_indices`: Original indices of retained features
+///     - `filtered_feat_sort_indices`: Subset of `feat_sort_indices` for retained features
 pub fn rm_feat_low_cv(
     array_2d: &Array2<f64>,
     cv_threshold: f64,
     n_features_to_select: usize,
-    sliding_windows: &Vec<Vec<usize>>,
-    feat_sort_indices: &Vec<Vec<usize>>,
+    sliding_windows: &[Vec<usize>],
+    feat_sort_indices: &[Vec<usize>],
 ) -> (Array2<f64>, Vec<usize>, Vec<Vec<usize>>) {
     debug_assert_eq!(
         array_2d.len_of(Axis(0)),
@@ -127,43 +127,42 @@ pub fn rm_feat_low_cv(
 /// + Accepets two vectors, sliding windows, and a threshold.
 /// + Returns a bool (true if the features are similar, false otherwise).
 fn check_similarity_2d(
-    feat1: &Vec<f64>,
-    feat2: &Vec<f64>,
-    sliding_windows: &Vec<Vec<usize>>,
+    feat1: &[f64],
+    feat2: &[f64],
+    sliding_windows: &[Vec<usize>],
     thre_pcc: f64,
-    sort_ind_f1: &Vec<usize>,
+    sort_ind_f1: &[usize],
 ) -> bool {
-    let (sorted_feat1, sorted_feat2) = sort_vecs_by_first(&feat1, &feat2, sort_ind_f1);
-    let n_windows = sliding_windows.len();
+    let (sorted_feat1, sorted_feat2) = sort_vecs_by_first(feat1, feat2, sort_ind_f1);
 
-    let mut pcc_vec: Vec<f64> = vec![0.0; n_windows];
-    pcc_vec.par_iter_mut().enumerate().for_each(|(i, pcc)| {
-        let window = &sliding_windows[i];
-        let part1 = sorted_feat1[window[0]..window[1]].to_vec();
-        let part2 = sorted_feat2[window[0]..window[1]].to_vec();
-        *pcc = pearsoncc(&part1, &part2, true);
-    });
+    // Check all sliding windows in parallel
+    let pcc_opt = sliding_windows
+        .par_iter()
+        .map(|window| {
+            pearsoncc(
+                &sorted_feat1[window[0]..window[1]],
+                &sorted_feat2[window[0]..window[1]],
+                true,
+            )
+        })
+        .max_by(|a, b| a.partial_cmp(b).unwrap());
 
     // Calculate PCC of the complete features.
     let pcc_complete = pearsoncc(&sorted_feat1, &sorted_feat2, true);
 
-    // Find the maximum PCC of the features' sliding windows.
-    let sorted_pcc_vec = sort_vec_f64(&pcc_vec);
-    let mut pcc_opt = sorted_pcc_vec[sorted_pcc_vec.len() - 1];
-    if pcc_opt < pcc_complete {
-        pcc_opt = pcc_complete;
-    }
+    // Get max between windowed PCCs and complete PCC
+    let max_pcc = pcc_opt.map_or(pcc_complete, |p| p.max(pcc_complete));
 
     // Check if the maximum PCC is above the threshold.
-    pcc_opt > thre_pcc
+    max_pcc > thre_pcc
 }
 
 /// Detect similar features pairs (using dynamic 2D sliding windows for optimal PCC calculation) then remove redundant features.
 pub fn remove_feat_similar(
     array_2d: &Array2<f64>,
     thre_pcc: f64,
-    sliding_windows: &Vec<Vec<usize>>,
-    feat_sort_indices: &Vec<Vec<usize>>,
+    sliding_windows: &[Vec<usize>],
+    feat_sort_indices: &[Vec<usize>],
 ) -> (Array2<f64>, Vec<usize>, Array2<i64>, Vec<Vec<usize>>) {
     // Calculate optimal PCC for each feature pair
     // Iter over all pairs of features (combinations of 2 rows)
@@ -197,9 +196,12 @@ pub fn remove_feat_similar(
         });
 
     let mut array_new = array_2d.clone();
-    let mut feat_sort_indices_new: Vec<Vec<usize>> = feat_sort_indices.clone();
+    let mut feat_sort_indices_new: Vec<Vec<usize>> = feat_sort_indices.to_vec();
 
-    if !feat_indices_to_remove.is_empty() {
+    if feat_indices_to_remove.is_empty() {
+        // If there are no similar features, return the original array_2d
+        feat_indices_to_keep = (0..array_2d.nrows()).collect();
+    } else {
         // Remove duplicated features from feat_indices_to_remove
         feat_indices_to_remove.sort_unstable();
         feat_indices_to_remove.dedup();
@@ -228,9 +230,6 @@ pub fn remove_feat_similar(
             .iter()
             .map(|&i| feat_sort_indices[i].clone())
             .collect();
-    } else {
-        // If there are no similar features, return the original array_2d
-        feat_indices_to_keep = (0..array_2d.nrows()).collect();
     }
 
     //
@@ -254,8 +253,8 @@ fn pearsoncc(vec1: &[f64], vec2: &[f64], abs: bool) -> f64 {
     // Check if vectors have the same length
     assert_eq!(vec1.len(), vec2.len());
     let len_v = vec1.len() as f64;
-    let mean_v1 = vec1.iter().sum::<f64>() as f64 / len_v;
-    let mean_v2 = vec2.iter().sum::<f64>() as f64 / len_v;
+    let mean_v1 = vec1.iter().sum::<f64>() / len_v;
+    let mean_v2 = vec2.iter().sum::<f64>() / len_v;
     let mut num = 0.0;
     let mut den_a = 0.0;
     let mut den_b = 0.0;
